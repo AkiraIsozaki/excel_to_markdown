@@ -1,0 +1,91 @@
+{
+  "skill_name": "refactor-java",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "StepViewModelのpivotCellプロパティが int[] で行・列を管理しています。int[0]が行、int[1]が列という暗黙の規約があり、ドキュメントなしでは意味がわかりません。Value Objectに変えてください。プロジェクトのディレクトリは /workspaces/claude-code-book-chapter8-main です。",
+      "expected_output": "CellPositionまたは同等のValue Objectを作成し、StepViewModelおよびテストコードを更新する。docs/architecture.mdまたはdocs/development-guidelines.mdを更新する。",
+      "assertions": [
+        {
+          "id": "vo_class_created",
+          "text": "新しいValue ObjectクラスまたはRecordが作成されている (CellPosition等)",
+          "type": "file_exists_or_grep"
+        },
+        {
+          "id": "int_array_removed",
+          "text": "StepViewModelからint[]によるpivot管理が削除されている",
+          "type": "code_change"
+        },
+        {
+          "id": "test_updated",
+          "text": "StepViewModelTestがValue Objectを使うよう更新されている",
+          "type": "code_change"
+        },
+        {
+          "id": "docs_updated",
+          "text": "docs/以下の少なくとも1つのファイルが更新されている",
+          "type": "docs_changed"
+        },
+        {
+          "id": "build_passes",
+          "text": "./gradlew build が成功する",
+          "type": "command_passes"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "EigenvalueCalculatorの公開メソッドを見直してください。現在publicになっているメソッドの中で、パッケージ外から本当に使われていないものをパッケージプライベートに変更してください。プロジェクトのディレクトリは /workspaces/claude-code-book-chapter8-main です。",
+      "expected_output": "EigenvalueCalculatorの不要にpublicなメソッドをパッケージプライベートに変更する。変更前にpublic/private状況を分析し、影響を確認してから変更する。docs/architecture.mdまたはdocs/development-guidelines.mdを更新する。",
+      "assertions": [
+        {
+          "id": "analysis_done",
+          "text": "変更前に各publicメソッドの使用箇所を分析している",
+          "type": "process"
+        },
+        {
+          "id": "visibility_reduced",
+          "text": "少なくとも1つのpublicメソッドがパッケージプライベートに変更されている",
+          "type": "code_change"
+        },
+        {
+          "id": "build_passes",
+          "text": "./gradlew build が成功する",
+          "type": "command_passes"
+        },
+        {
+          "id": "docs_updated",
+          "text": "docs/以下の少なくとも1つのファイルが更新されている",
+          "type": "docs_changed"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "MatrixServiceクラスを見直してください。staticフィールドやstaticメソッドが多用されています。設計上の問題点を分析して、より保守しやすい設計に改善してください。プロジェクトのディレクトリは /workspaces/claude-code-book-chapter8-main です。",
+      "expected_output": "MatrixServiceのstaticメソッド/フィールドを分析し、インスタンスメソッドに移行できるものを移行する。完全コンストラクタパターンを活用する。ドキュメントも更新する。",
+      "assertions": [
+        {
+          "id": "analysis_done",
+          "text": "staticメソッド/フィールドの分析と問題点の説明がある",
+          "type": "process"
+        },
+        {
+          "id": "static_reduced",
+          "text": "staticの使用が削減または適切に制限されている",
+          "type": "code_change"
+        },
+        {
+          "id": "build_passes",
+          "text": "./gradlew build が成功する",
+          "type": "command_passes"
+        },
+        {
+          "id": "docs_updated",
+          "text": "docs/以下の少なくとも1つのファイルが更新されている",
+          "type": "docs_changed"
+        }
+      ]
+    }
+  ]
+}
