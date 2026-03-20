@@ -239,3 +239,13 @@ class TestPerformance:
         _run_pipeline(wb)
         elapsed = time.perf_counter() - start
         assert elapsed < 3.0, f"100行×50列の変換に {elapsed:.2f}秒 かかった（上限3秒）"
+
+    def test_performance_1000rows(self) -> None:
+        """1,000行×50列の方眼紙を30秒以内に変換できること。
+        計測方法: time.perf_counter() で計測し pytest 内でアサーション。
+        """
+        wb = self._build_sheet(1000, 50)
+        start = time.perf_counter()
+        _run_pipeline(wb)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 30.0, f"1000行×50列の変換に {elapsed:.2f}秒 かかった（上限30秒）"

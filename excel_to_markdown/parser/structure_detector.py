@@ -203,6 +203,7 @@ def _classify_single_block(block: TextBlock, base_font_size: float) -> DocElemen
             level=heading_level,
             source_row=block.top_row,
             comment_text=block.comment_text,
+            hyperlink=block.hyperlink,
         )
 
     # リスト判定: インデントレベルが1以上の非見出し
@@ -215,6 +216,7 @@ def _classify_single_block(block: TextBlock, base_font_size: float) -> DocElemen
             source_row=block.top_row,
             is_numbered_list=is_numbered,
             comment_text=block.comment_text,
+            hyperlink=block.hyperlink,
         )
 
     # 段落
@@ -226,6 +228,7 @@ def _classify_single_block(block: TextBlock, base_font_size: float) -> DocElemen
         source_row=block.top_row,
         is_numbered_list=is_numbered,
         comment_text=block.comment_text,
+        hyperlink=block.hyperlink,
     )
 
 

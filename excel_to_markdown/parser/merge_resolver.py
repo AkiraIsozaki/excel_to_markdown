@@ -58,6 +58,7 @@ def resolve(cells: list[RawCell]) -> list[TextBlock]:
                 comment_text=cell.comment_text,
                 indent_level=0,
                 inline_runs=inline_runs,
+                hyperlink=cell.hyperlink,
             )
         )
 

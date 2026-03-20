@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from excel_to_markdown.models import RawCell
-from excel_to_markdown.parser.merge_resolver import resolve
+from excel_to_markdown.parser.merge_resolver import resolve, to_inline_runs
 
 
 def _make_cell(
@@ -117,3 +117,112 @@ class TestResolveCellNewline:
         cells = [_make_cell(1, 1, "Line1\nLine2")]
         blocks = resolve(cells)
         assert blocks[0].text == "Line1\nLine2"
+
+
+# ---------------------------------------------------------------------------
+# to_inline_runs
+# ---------------------------------------------------------------------------
+
+
+class TestToInlineRuns:
+    def test_plain_string_returns_empty(self) -> None:
+        """通常の str 値はリッチテキストでないので空リストを返す。"""
+        result = to_inline_runs("plain text")
+        assert result == []
+
+    def test_none_returns_empty(self) -> None:
+        result = to_inline_runs(None)
+        assert result == []
+
+    def test_int_returns_empty(self) -> None:
+        result = to_inline_runs(42)
+        assert result == []
+
+    def test_rich_text_plain_string_parts(self) -> None:
+        """CellRichText の文字列パーツが InlineRun に変換される。"""
+        try:
+            from openpyxl.cell.rich_text import CellRichText
+        except ImportError:
+            pytest.skip("openpyxl rich text not available")
+        rt = CellRichText("Hello", " World")
+        result = to_inline_runs(rt)
+        assert len(result) == 2
+        assert result[0].text == "Hello"
+        assert result[1].text == " World"
+        assert result[0].bold is False
+        assert result[0].italic is False
+
+    def test_rich_text_empty_string_parts_skipped(self) -> None:
+        """空文字列パーツはスキップされる。"""
+        try:
+            from openpyxl.cell.rich_text import CellRichText
+        except ImportError:
+            pytest.skip("openpyxl rich text not available")
+        rt = CellRichText("", "Keep")
+        result = to_inline_runs(rt)
+        assert len(result) == 1
+        assert result[0].text == "Keep"
+
+    def test_rich_text_textblock_with_bold(self) -> None:
+        """CellRichText の TextBlock パーツで bold が正しく変換される。"""
+        try:
+            from openpyxl.cell.rich_text import CellRichText
+            from openpyxl.cell.rich_text import TextBlock as OxlTextBlock
+            from openpyxl.cell.text import InlineFont
+        except ImportError:
+            pytest.skip("openpyxl rich text not available")
+        rt = CellRichText(OxlTextBlock(InlineFont(b=True), "BoldText"))
+        result = to_inline_runs(rt)
+        assert len(result) == 1
+        assert result[0].text == "BoldText"
+        assert result[0].bold is True
+        assert result[0].italic is False
+
+    def test_rich_text_textblock_with_italic(self) -> None:
+        try:
+            from openpyxl.cell.rich_text import CellRichText
+            from openpyxl.cell.rich_text import TextBlock as OxlTextBlock
+            from openpyxl.cell.text import InlineFont
+        except ImportError:
+            pytest.skip("openpyxl rich text not available")
+        rt = CellRichText(OxlTextBlock(InlineFont(i=True), "ItalicText"))
+        result = to_inline_runs(rt)
+        assert result[0].italic is True
+        assert result[0].bold is False
+
+    def test_rich_text_textblock_with_strikethrough(self) -> None:
+        try:
+            from openpyxl.cell.rich_text import CellRichText
+            from openpyxl.cell.rich_text import TextBlock as OxlTextBlock
+            from openpyxl.cell.text import InlineFont
+        except ImportError:
+            pytest.skip("openpyxl rich text not available")
+        rt = CellRichText(OxlTextBlock(InlineFont(strike=True), "StrikeText"))
+        result = to_inline_runs(rt)
+        assert result[0].strikethrough is True
+
+    def test_rich_text_textblock_with_underline(self) -> None:
+        try:
+            from openpyxl.cell.rich_text import CellRichText
+            from openpyxl.cell.rich_text import TextBlock as OxlTextBlock
+            from openpyxl.cell.text import InlineFont
+        except ImportError:
+            pytest.skip("openpyxl rich text not available")
+        rt = CellRichText(OxlTextBlock(InlineFont(u="single"), "UnderText"))
+        result = to_inline_runs(rt)
+        assert result[0].underline is True
+
+    def test_rich_text_textblock_empty_text_skipped(self) -> None:
+        """TextBlock で text が空のものはスキップされる。"""
+        try:
+            from openpyxl.cell.rich_text import CellRichText
+            from openpyxl.cell.rich_text import TextBlock as OxlTextBlock
+            from openpyxl.cell.text import InlineFont
+        except ImportError:
+            pytest.skip("openpyxl rich text not available")
+        rt = CellRichText(OxlTextBlock(InlineFont(b=True), ""), "Keep")
+        result = to_inline_runs(rt)
+        # 空 TextBlock はスキップ、文字列 "Keep" は変換
+        texts = [r.text for r in result]
+        assert "Keep" in texts
+        assert "" not in texts

@@ -38,6 +38,7 @@ class RawCell:
     merge_col_span: int  # 結合の列スパン（非結合・非起点は1）
     has_comment: bool  # セルコメントの有無
     comment_text: str | None  # セルコメントのテキスト
+    hyperlink: str | None = None  # ハイパーリンクURL（なければNone）
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +81,7 @@ class TextBlock:
     comment_text: str | None
     indent_level: int = 0  # 後処理で計算。左端列位置から算出したインデント階層
     inline_runs: list[InlineRun] = field(default_factory=list)
+    hyperlink: str | None = None  # ハイパーリンクURL（なければNone）
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +109,7 @@ class DocElement:
     source_row: int  # 元のExcel行番号（ソート・デバッグ用）
     is_numbered_list: bool = False  # 番号付きリスト（`1.`/`1)` 始まり）か否か
     comment_text: str | None = None  # 脚注として出力するセルコメント
+    hyperlink: str | None = None  # ハイパーリンクURL（なければNone）
 
 
 @dataclass

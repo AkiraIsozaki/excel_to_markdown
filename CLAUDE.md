@@ -1,7 +1,17 @@
 # プロジェクトメモリ
 
 ## 技術スタック
-更新してくださいv
+
+| 分類 | 技術 |
+|------|------|
+| 言語 | Python 3.12 |
+| xlsx読み込み | openpyxl 3.1+ |
+| xls読み込み | xlrd 2.x（オプション） |
+| CLI | argparse（標準ライブラリ） |
+| テスト | pytest 8.x + pytest-cov |
+| リント | ruff |
+| 型チェック | mypy（strict） |
+| ビルド | hatchling |
 ## スペック駆動開発の基本原則
 
 ### 基本フロー

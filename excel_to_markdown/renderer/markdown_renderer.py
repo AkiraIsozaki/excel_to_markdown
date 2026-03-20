@@ -39,6 +39,10 @@ def render_element(el: DocElement, footnote_counter: int) -> tuple[str, int]:
     """1要素を Markdown 文字列に変換する。脚注付き要素は連番を更新して返す。"""
     text = convert_cell_newlines(el.text)
 
+    # ハイパーリンク変換
+    if el.hyperlink:
+        text = f"[{text}]({el.hyperlink})"
+
     # 脚注マーカーを付記
     if el.comment_text:
         text = text + f"[^{footnote_counter}]"

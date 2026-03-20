@@ -109,6 +109,9 @@ def read_sheet(ws: Worksheet, print_area: str | None = None) -> list[RawCell]:
             row_span, col_span = merge_origins.get(pos, (1, 1))
             has_comment = cell.comment is not None
             comment_text = cell.comment.text if has_comment else None
+            hyperlink: str | None = None
+            if cell.hyperlink is not None:
+                hyperlink = cell.hyperlink.target or None
 
             raw_cells.append(
                 RawCell(
@@ -127,6 +130,7 @@ def read_sheet(ws: Worksheet, print_area: str | None = None) -> list[RawCell]:
                     merge_col_span=col_span,
                     has_comment=has_comment,
                     comment_text=comment_text,
+                    hyperlink=hyperlink,
                 )
             )
 

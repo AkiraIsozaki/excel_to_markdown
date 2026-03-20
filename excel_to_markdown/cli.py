@@ -39,14 +39,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "input",
-        help="変換する .xlsx または .xls ファイルのパス",
+        help="変換する .xlsx/.xls ファイルのパス、またはディレクトリ（バッチ変換）",
     )
     parser.add_argument(
         "--output",
         "-o",
         default=None,
         metavar="OUTPUT",
-        help="出力 .md ファイルパス（省略時: 入力と同名 .md）",
+        help="出力 .md ファイルパス（省略時: 入力と同名 .md）。ディレクトリ入力時は無視",
     )
     parser.add_argument(
         "--sheet",
@@ -79,52 +79,55 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def run(args: argparse.Namespace) -> int:
     """変換パイプライン全体を実行し、exit code を返す。
 
-    複数シート統合ロジック:
-    1. 全シートを順番に処理する（--sheet 指定時は1シートのみ）
-    2. 各シートの Markdown 文字列を生成する
-    3. シート数が2枚以上の場合: シート名を `# シート名\\n\\n---\\n\\n` で区切り1つに連結する
-    4. 最終 Markdown 文字列を出力ファイルに書き出す
+    ディレクトリが指定された場合はバッチ変換モードで動作する。
     """
-    output_path: Path | None = None
     try:
         input_path = Path(args.input).resolve()
+
+        # バッチ変換モード
+        if input_path.is_dir():
+            return _run_batch(input_path, args)
+
         _validate_input(input_path)
-
         output_path = _resolve_output_path(input_path, args.output)
+        return _convert_file(input_path, output_path, args)
 
-        wb = _open_workbook(input_path)
+    except FileNotFoundError as e:
+        print(f"エラー: ファイルが見つかりません: {e}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"エラー: {e}", file=sys.stderr)
+        return 1
+    except PermissionError:
+        print(f"エラー: 出力ファイルに書き込めません", file=sys.stderr)
+        return 1
+    except Exception as e:  # noqa: BLE001
+        print(f"予期しないエラーが発生しました: {e}", file=sys.stderr)
+        return 2
 
-        sheets = _select_sheets(wb, args.sheet)
 
-        sheet_markdowns: list[tuple[str, str]] = []  # (sheet_name, markdown)
+def _run_batch(dir_path: Path, args: argparse.Namespace) -> int:
+    """ディレクトリ配下の全 xlsx/xls を変換する。エラー時は stderr に出力して継続。"""
+    targets = sorted(
+        list(dir_path.glob("**/*.xlsx")) + list(dir_path.glob("**/*.xls"))
+    )
+    if not targets:
+        print(f"警告: ディレクトリ内に変換対象ファイルが見つかりません: {dir_path}", file=sys.stderr)
+        return 0
 
-        for ws in sheets:
-            sheet_name: str = ws.title
-            raw_cells = read_sheet(ws)
-            if not any(c.value for c in raw_cells):
-                print(
-                    f'警告: シート "{sheet_name}" にコンテンツがありません。スキップします',
-                    file=sys.stderr,
-                )
-                continue
+    exit_code = 0
+    for file_path in targets:
+        output_path = file_path.with_suffix(".md")
+        code = _convert_file(file_path, output_path, args)
+        if code != 0:
+            exit_code = code
+    return exit_code
 
-            grid = _build_grid(ws, raw_cells)
-            blocks = resolve(raw_cells)
 
-            if args.debug:
-                _dump_blocks_debug(blocks)
-
-            tables, remaining = find_tables(blocks, grid)
-            doc_elements = detect(remaining, grid, args.base_font_size)
-
-            all_elements: list[DocElement] = sorted(
-                list(tables) + doc_elements,
-                key=lambda e: e.source_row,
-            )
-
-            footnotes = [e.comment_text for e in all_elements if e.comment_text]
-            md = render(all_elements, footnotes)
-            sheet_markdowns.append((sheet_name, md))
+def _convert_file(input_path: Path, output_path: Path, args: argparse.Namespace) -> int:
+    """単一ファイルを変換して出力ファイルに書き出す。exit code を返す。"""
+    try:
+        sheet_markdowns = _process_workbook(input_path, args)
 
         if not sheet_markdowns:
             return 0
@@ -150,8 +153,124 @@ def run(args: argparse.Namespace) -> int:
         print(f"エラー: 出力ファイルに書き込めません: {output_path}", file=sys.stderr)
         return 1
     except Exception as e:  # noqa: BLE001
-        print(f"予期しないエラーが発生しました: {e}", file=sys.stderr)
+        print(f"予期しないエラーが発生しました ({input_path.name}): {e}", file=sys.stderr)
         return 2
+
+
+def _process_workbook(
+    input_path: Path, args: argparse.Namespace
+) -> list[tuple[str, str]]:
+    """ワークブックを処理して (sheet_name, markdown) のリストを返す。"""
+    suffix = input_path.suffix.lower()
+    if suffix == ".xls":
+        return _process_xls(input_path, args)
+    return _process_xlsx(input_path, args)
+
+
+def _process_xlsx(
+    input_path: Path, args: argparse.Namespace
+) -> list[tuple[str, str]]:
+    """xlsx ファイルを処理して (sheet_name, markdown) のリストを返す。"""
+    wb = _open_workbook(input_path)
+    sheets = _select_sheets(wb, args.sheet)
+    sheet_markdowns: list[tuple[str, str]] = []
+
+    for ws in sheets:
+        sheet_name: str = ws.title
+        raw_cells = read_sheet(ws)
+        if not any(c.value for c in raw_cells):
+            print(
+                f'警告: シート "{sheet_name}" にコンテンツがありません。スキップします',
+                file=sys.stderr,
+            )
+            continue
+
+        grid = _build_grid(ws, raw_cells)
+        md = _run_pipeline(raw_cells, grid, args)
+        sheet_markdowns.append((sheet_name, md))
+
+    return sheet_markdowns
+
+
+def _process_xls(
+    input_path: Path, args: argparse.Namespace
+) -> list[tuple[str, str]]:
+    """xls ファイルを処理して (sheet_name, markdown) のリストを返す。"""
+    try:
+        import xlrd
+    except ImportError as e:
+        raise ValueError(
+            ".xls ファイルの変換には xlrd が必要です。`pip install xlrd` でインストールしてください"
+        ) from e
+
+    from excel_to_markdown.reader.xls_reader import read_sheet_xls
+
+    try:
+        book = xlrd.open_workbook(str(input_path), formatting_info=True)
+    except Exception as e:
+        msg = str(e).lower()
+        if "password" in msg or "encrypted" in msg or "protect" in msg:
+            raise ValueError("パスワード保護されたファイルは変換できません") from e
+        raise
+
+    sheet_markdowns: list[tuple[str, str]] = []
+
+    if args.sheet is not None:
+        sheet_names = book.sheet_names()
+        if args.sheet.isdigit():
+            idx = int(args.sheet)
+            if idx >= len(sheet_names):
+                raise ValueError(
+                    f"シートが見つかりません: {args.sheet}（存在するシート: {sheet_names}）"
+                )
+            target_sheets = [book.sheet_by_index(idx)]
+            target_names = [sheet_names[idx]]
+        else:
+            if args.sheet not in sheet_names:
+                raise ValueError(
+                    f"シートが見つかりません: {args.sheet}（存在するシート: {sheet_names}）"
+                )
+            target_sheets = [book.sheet_by_name(args.sheet)]
+            target_names = [args.sheet]
+    else:
+        target_sheets = [book.sheet_by_index(i) for i in range(book.nsheets)]
+        target_names = book.sheet_names()
+
+    for sheet, sheet_name in zip(target_sheets, target_names):
+        raw_cells = read_sheet_xls(sheet, book)
+        if not any(c.value for c in raw_cells):
+            print(
+                f'警告: シート "{sheet_name}" にコンテンツがありません。スキップします',
+                file=sys.stderr,
+            )
+            continue
+
+        grid = CellGrid(cells=raw_cells)
+        md = _run_pipeline(raw_cells, grid, args)
+        sheet_markdowns.append((sheet_name, md))
+
+    return sheet_markdowns
+
+
+def _run_pipeline(
+    raw_cells: list[RawCell], grid: CellGrid, args: argparse.Namespace
+) -> str:
+    """RawCell リストと CellGrid を受け取り Markdown 文字列を返す。"""
+    blocks = resolve(raw_cells)
+
+    if args.debug:
+        _dump_blocks_debug(blocks)
+
+    tables, remaining = find_tables(blocks, grid)
+    doc_elements = detect(remaining, grid, args.base_font_size)
+
+    all_elements: list[DocElement] = sorted(
+        list(tables) + doc_elements,
+        key=lambda e: e.source_row,
+    )
+
+    footnotes = [e.comment_text for e in all_elements if e.comment_text]
+    return render(all_elements, footnotes)
 
 
 def main() -> None:
@@ -239,8 +358,18 @@ def _dump_blocks_debug(blocks: list[TextBlock]) -> None:
 
 
 def _write_output(path: Path, content: str) -> None:
-    """Markdown を UTF-8 で書き出す。"""
+    """Markdown を UTF-8 でアトミックに書き出す。
+
+    tmpファイルに書き込んでから rename することで、
+    書き込み失敗時に部分的な出力ファイルが残らないことを保証する。
+    """
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
-        path.write_text(content, encoding="utf-8")
+        tmp_path.write_text(content, encoding="utf-8")
+        tmp_path.replace(path)
     except OSError as e:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         raise PermissionError(f"出力ファイルに書き込めません: {path}") from e
