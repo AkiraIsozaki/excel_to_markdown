@@ -91,7 +91,13 @@ def compute_indent_tiers(blocks: list[TextBlock], grid: CellGrid) -> dict[int, i
     tiers: dict[int, int] = {sorted_cols[0]: 0}
     tier = 0
     for i in range(1, len(sorted_cols)):
-        if sorted_cols[i] - sorted_cols[i - 1] > threshold:
+        # 列インデックス差ではなく実際の文字幅の累積でギャップを計算する
+        # col_widths は {col_index: width_in_chars} の辞書
+        gap = sum(
+            grid.col_widths.get(c, grid.col_unit)
+            for c in range(sorted_cols[i - 1], sorted_cols[i])
+        )
+        if gap > threshold:
             tier += 1
         tiers[sorted_cols[i]] = tier
     return tiers

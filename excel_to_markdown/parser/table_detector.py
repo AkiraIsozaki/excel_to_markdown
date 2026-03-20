@@ -45,6 +45,8 @@ def find_tables(
 
         # 起点行から下に向かって同じ列境界を持つ隣接行を探す
         # 「隣接」: 直前の行の bottom_row の直後の行（行番号が連続している）
+        # 列の部分一致も許可: 起点行の列集合のサブセットであれば行を表に含める
+        cols_in_start_row_set = set(cols_in_start_row)
         table_rows: list[int] = [start_row]
         for r in sorted_rows:
             if r <= start_row:
@@ -58,13 +60,14 @@ def find_tables(
             )
             if r > prev_bottom + 1:
                 break  # 行ギャップあり → 表終了
-            if sorted(row_col_map[r].keys()) == cols_in_start_row:
+            row_cols = set(row_col_map[r].keys())
+            if row_cols.issubset(cols_in_start_row_set) and len(row_cols) >= 2:
                 # 全ブロックが未使用であることを確認
                 if any(id(b) in used for b in row_col_map[r].values()):
                     break
                 table_rows.append(r)
             else:
-                break  # 列境界が崩れたら終了
+                break  # 列境界が合わない → 表終了
 
         if len(table_rows) < 2:
             continue  # 1行のみでは表にならない
@@ -85,7 +88,10 @@ def _build_table(
     row_col_map: dict[int, dict[int, TextBlock]],
     cols: list[int],
 ) -> TableElement:
-    """検出済み矩形から TableElement を構築する。"""
+    """検出済み矩形から TableElement を構築する。
+
+    cols は起点行の全列。後続行が一部の列しか持たない場合は空文字で補完する。
+    """
     rows: list[list[TableCell]] = []
     col_count = len(cols)
 
@@ -93,7 +99,11 @@ def _build_table(
     first_row_blocks = [row_col_map[table_rows[0]][c] for c in cols]
     first_row_all_bold = all(b.font_bold for b in first_row_blocks)
     has_non_bold_row = any(
-        not all(row_col_map[r][c].font_bold for c in cols) for r in table_rows[1:]
+        not all(
+            (b := row_col_map[r].get(c)) is not None and b.font_bold
+            for c in cols
+        )
+        for r in table_rows[1:]
     )
     use_header = first_row_all_bold and has_non_bold_row
 
@@ -101,8 +111,9 @@ def _build_table(
         row_cells: list[TableCell] = []
         is_header = use_header and rel_row == 0
         for rel_col, c in enumerate(cols):
-            block = row_col_map[r][c]
-            tc = TableCell(text=block.text, row=rel_row, col=rel_col, is_header=is_header)
+            block = row_col_map[r].get(c)
+            text = block.text if block is not None else ""
+            tc = TableCell(text=text, row=rel_row, col=rel_col, is_header=is_header)
             row_cells.append(tc)
         rows.append(row_cells)
 

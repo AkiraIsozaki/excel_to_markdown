@@ -135,10 +135,10 @@ def _convert_file(input_path: Path, output_path: Path, args: argparse.Namespace)
         if len(sheet_markdowns) == 1:
             final_md = sheet_markdowns[0][1]
         else:
-            parts: list[str] = []
-            for sheet_name, md in sheet_markdowns:
-                parts.append(f"# {sheet_name}\n\n---\n\n{md}")
-            final_md = "\n".join(parts)
+            parts: list[str] = [
+                f"# {sheet_name}\n\n{md}" for sheet_name, md in sheet_markdowns
+            ]
+            final_md = "\n\n---\n\n".join(parts)
 
         _write_output(output_path, final_md)
         return 0
