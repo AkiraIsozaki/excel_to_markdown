@@ -1,5 +1,8 @@
 # リポジトリ構造定義書 (Repository Structure Document)
 
+> **注意**: 本ドキュメントは実装目標として定義した構造を記述しています。
+> 現在の実装状況はステアリングファイル（`.steering/`）の `tasklist.md` を参照してください。
+
 ## プロジェクト構造
 
 ```
@@ -58,10 +61,25 @@ excel_to_markdown/
 │   ├── development-guidelines.md
 │   └── glossary.md
 │
-├── .claude/                     # Claude Code設定
-│   ├── commands/
-│   ├── skills/
-│   └── agents/
+├── .claude/                     # Claude Code設定（リポジトリに含める）
+│   ├── settings.json            # Claude Code設定
+│   ├── settings.local.json      # ローカル設定（gitignore対象）
+│   ├── commands/                # スラッシュコマンド定義
+│   │   ├── setup-project.md
+│   │   ├── add-feature.md
+│   │   ├── review-docs.md
+│   │   └── refactor.md
+│   ├── skills/                  # Claude Codeスキル定義
+│   │   ├── prd-writing/
+│   │   ├── functional-design/
+│   │   ├── architecture-design/
+│   │   ├── repository-structure/
+│   │   ├── development-guidelines/
+│   │   ├── glossary-creation/
+│   │   └── steering/
+│   └── agents/                  # サブエージェント定義
+│       ├── doc-reviewer.md
+│       └── implementation-validator.md
 │
 ├── .steering/                   # 開発作業ステアリングファイル（一時）
 │
@@ -97,8 +115,9 @@ excel_to_markdown/
 - `xls_reader.py`: xlrdでの.xls読み込み（P1）
 
 **命名規則**:
-- 関数名: `read_sheet(ws, print_area) -> list[RawCell]`
-- 同一のシグネチャを持ち、呼び出し元（cli.py）が実装を切り替え可能
+- `xlsx_reader.py` のエントリーポイント: `read_sheet(ws, print_area) -> list[RawCell]`
+- `xls_reader.py` のエントリーポイント: `read_sheet_xls(sheet, wb) -> list[RawCell]`（P1、xlrdのAPIが異なるため別名）
+- `cli.py` がファイル拡張子に応じてどちらを呼ぶか切り替えるアダプターとして機能する
 
 **依存関係**:
 - 依存可能: `models.py`、openpyxl、xlrd
@@ -119,6 +138,10 @@ excel_to_markdown/
 **依存関係**:
 - 依存可能: `models.py`
 - 依存禁止: `reader/`、`renderer/`、`cli.py`
+
+**モジュール内の役割**:
+- 空間解析サブレイヤー: `cell_grid` → `merge_resolver`（RawCell → TextBlock）
+- 構造検出サブレイヤー: `table_detector` → `structure_detector`（TextBlock → DocElement）
 
 **モジュール内依存順序**（循環禁止）:
 ```
@@ -190,6 +213,15 @@ def xlsx_builder():
 | 統合テスト | `tests/` | `test_integration.py` | — |
 | ゴールデンファイル | `tests/fixtures/` | `{fixture_name}.md` | `mixed_document.md` |
 
+**P1機能のテスト**: `test_xls_reader.py` は `.xls` 対応（P1）の実装時に追加する。
+
+### ドキュメントファイル
+
+| ドキュメント種別 | 配置先 | 命名規則 | 例 |
+|----------------|--------|---------|-----|
+| 正式版ドキュメント | `docs/` | `{document-type}.md`（ハイフン区切り） | `functional-design.md` |
+| アイデア・下書き | `docs/ideas/` | 自由形式 | `initial-requirements.md` |
+
 ### 設定ファイル
 
 | ファイル種別 | 配置先 | 命名規則 |
@@ -233,7 +265,9 @@ cli.py / __main__.py
     ↓
 reader/ (xlsx_reader, xls_reader)
     ↓
-parser/ (cell_grid → merge_resolver → table_detector → structure_detector)
+parser/
+  ├── 空間解析: cell_grid → merge_resolver   (RawCell → TextBlock)
+  └── 構造検出: table_detector → structure_detector  (TextBlock → DocElement)
     ↓
 renderer/ (markdown_renderer)
     ↓
@@ -290,15 +324,25 @@ models.py ←── 全モジュールが参照可能（共有レイヤー）
     └── tasklist.md
 ```
 
-**.gitignore に追加**: ステアリングファイルは作業完了後に削除するため、リポジトリには含めない
+**.gitignore に追加**: ステアリングファイルはリポジトリには含めない。作業完了後も履歴として `.steering/` ディレクトリに保持し、削除はしない。
 
 ### .claude/（Claude Code設定）
 
 Claude Codeのカスタマイズ設定。このディレクトリはリポジトリに含める。
 
+| サブディレクトリ | 役割 |
+|-----------------|------|
+| `commands/` | `/setup-project` 等のスラッシュコマンドを `.md` ファイルで定義 |
+| `skills/` | 各スキル（PRD作成・機能設計等）のガイドとテンプレートを格納 |
+| `agents/` | `doc-reviewer` 等のサブエージェントの動作定義 |
+| `settings.json` | Claude Codeの権限・フック設定（リポジトリに含める） |
+| `settings.local.json` | ローカル固有の設定（gitignore対象） |
+
 ---
 
-## 除外設定（.gitignore）
+## 除外設定（.gitignore 定義）
+
+以下の内容で `.gitignore` を作成すること。
 
 ```gitignore
 # Python
