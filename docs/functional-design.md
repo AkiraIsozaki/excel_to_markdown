@@ -146,6 +146,8 @@ class TableCell:
     row: int                # テーブル相対行インデックス (0-based)
     col: int                # テーブル相対列インデックス (0-based)
     is_header: bool         # 最初の行のセルはTrue
+    # 注意: 表内の結合セルはセルスパンのMarkdown表現が未サポート。
+    #       非起点セルは空文字("")として出力される（情報の欠落を抑制するためベストエフォート）。
 
 @dataclass
 class TableElement(DocElement):
@@ -208,9 +210,11 @@ erDiagram
 
 ---
 
-### 1. cli.py — CLIレイヤー
+### 1. cli.py / __main__.py — CLIレイヤー
 
 **責務**: コマンドライン引数のパース・バリデーション、変換パイプラインの起動
+
+**`__main__.py`**: `python -m excel_to_markdown` のエントリーポイント。`cli.py` の `main()` を呼び出すのみで、ロジックは持たない。
 
 ```python
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -297,8 +301,8 @@ def read_sheet_xls(sheet: xlrd.sheet.Sheet, wb: xlrd.Book) -> list[RawCell]:
 @dataclass
 class CellGrid:
     cells: list[RawCell]
-    col_widths: dict[int, float]    # 列番号 → 列幅（Excel単位）
-    row_heights: dict[int, float]   # 行番号 → 行高さ（Excel単位）
+    col_widths: dict[int, float]    # 列番号 → 列幅（Excel文字幅単位: ws.column_dimensions[col].width で取得する値）
+    row_heights: dict[int, float]   # 行番号 → 行高さ（Excelポイント単位: ws.row_dimensions[row].height で取得する値）
 
     @property
     def baseline_col(self) -> int:
@@ -411,6 +415,8 @@ def is_label_value_pair(left: TextBlock, right: TextBlock) -> bool:
     """
     同一行の2ブロックがラベル:値パターンか判定する。
     判定条件: left.textが20文字以下
+    前提: top_rowが一致する2ブロックの組に対して呼び出すこと。
+          行一致の確認は呼び出し元のprocess_row_group()が担当する。
     """
     ...
 ```
@@ -427,13 +433,17 @@ def is_label_value_pair(left: TextBlock, right: TextBlock) -> bool:
 | 6 | `font_bold` かつ `indent_level >= 2` | H6 |
 | — | 上記いずれにも該当しない | 見出しでない |
 
+> **前提**: `font_size=None`（Excelのデフォルトスタイル継承）の場合、優先度1〜3のフォントサイズ条件はすべて不成立として扱う。太字フラグのみで判定する優先度4〜6は `font_size=None` でも適用される。
+
 **空行挿入ルール**:
 
 | 条件 | 挿入 |
 |------|------|
 | ブロック間の行ギャップ > `modal_row_height × 2` | BLANK要素を挿入 |
 | 前ブロックと後ブロックの背景色が異なる | BLANK要素を挿入 |
-| 前ブロックの背景色が白(FFFFFFFF)以外で後ブロックが白または`None` | BLANK要素を挿入 |
+| 前ブロックの背景色が白(`FFFFFFFF`)以外で後ブロックが白(`FFFFFFFF`)または`None` | BLANK要素を挿入 |
+
+> **背景色の表記**: 本ドキュメントでは ARGB hex 形式（例: `FFFFFFFF`）を使用する。openpyxl の `bg_color` は `FF` + `RRGGBB` の8桁で返るため、白色の判定は `"FFFFFFFF"` との比較で行う。
 
 ---
 
@@ -445,7 +455,10 @@ def is_label_value_pair(left: TextBlock, right: TextBlock) -> bool:
 def render(elements: list[DocElement], footnotes: list[str]) -> str:
     """
     DocElementリストをMarkdown文字列に変換する。
-    footnotes: 脚注テキストリスト（セルコメント）。末尾に付加する。
+    footnotes: 脚注テキストリスト（セルコメント）。
+              呼び出し元(cli.py)がDocElementのcomment_textを走査して収集し渡す。
+              脚注番号はrender_element()が[^1]から連番で付与する。
+              末尾に[^1]: 内容 の形式で一括出力する。
     """
     ...
 
@@ -519,7 +532,9 @@ sequenceDiagram
         CLI->>MR: resolve(cells) → list[TextBlock]
         CLI->>TD: find_tables(blocks, grid) → (tables, remaining_blocks)
         CLI->>SD: detect(remaining_blocks, grid) → list[DocElement]
-        SD-->>CLI: tables + doc_elements (統合・ソート済み)
+        SD-->>CLI: list[DocElement]（remaining_blocksから生成）
+        CLI->>CLI: tables + doc_elements を source_row でマージ・ソート
+        CLI->>CLI: DocElementのcomment_textを走査してfootnotesを収集
         CLI->>R: render(elements, footnotes)
         R-->>CLI: Markdown文字列
     end
@@ -685,12 +700,20 @@ options:
 
 ### パフォーマンステスト
 
+**計測環境**: CPU Core i5相当、メモリ8GB（`docs/architecture.md` のパフォーマンス要件参照）
+
 ```python
 def test_performance_100rows():
-    """A4縦1ページ相当（100行×50列）を3秒以内に変換できること。"""
+    """A4縦1ページ相当（100行×50列）を3秒以内に変換できること。
+    計測環境: CPU Core i5相当、メモリ8GB。
+    計測方法: time.perf_counter() で計測し pytest 内でアサーション。
+    """
     ...
 
 def test_performance_1000rows():
-    """1,000行×50列の方眼紙を30秒以内に変換できること。"""
+    """1,000行×50列の方眼紙を30秒以内に変換できること。
+    計測環境: CPU Core i5相当、メモリ8GB。
+    計測方法: time.perf_counter() で計測し pytest 内でアサーション。
+    """
     ...
 ```

@@ -74,6 +74,18 @@ Excel: [氏名:]  [山田太郎]
 
 ---
 
+### WARNINGコメント
+
+**定義**: 変換結果のMarkdownに挿入する構造認識失敗の通知コメント。
+
+**形式**: `<!-- WARNING: 構造を認識できませんでした -->`
+
+**本プロジェクトでの使用**: ベストエフォート変換でセルを段落として出力した際に、認識失敗を明示するために挿入する。
+
+**関連用語**: ベストエフォート変換
+
+---
+
 ## データモデル用語
 
 変換パイプラインの各ステージで使用するデータ構造。
@@ -82,10 +94,12 @@ Excel: [氏名:]  [山田太郎]
 
 **定義**: openpyxl（またはxlrd）からセルの生データを取り出した中間データ構造。
 
-**主要フィールド**:
+**主要フィールド**（完全な定義は `functional-design.md` のレイヤー1参照）:
 - `row`, `col`: 1-based行・列番号
 - `value`: セルの文字列値（数値は変換済み）
-- `font_bold`, `font_italic`, `font_size`: フォント書式
+- `font_bold`, `font_italic`, `font_strikethrough`, `font_underline`: フォント書式フラグ
+- `font_size`: フォントサイズ（pt）。未設定時は `None`
+- `font_color`: 文字色（ARGB hex）。テーマ色は `None`
 - `bg_color`: 背景色（ARGB hex）
 - `is_merge_origin`: 結合セルの起点か否か
 - `merge_row_span`, `merge_col_span`: 結合スパン
@@ -106,6 +120,7 @@ Excel: [氏名:]  [山田太郎]
 **主要フィールド**:
 - `text`: テキスト内容
 - `top_row`, `left_col`, `bottom_row`, `right_col`: 領域の座標
+- `row_span`, `col_span`: 結合セルの行・列スパン数（非結合は1）
 - `indent_level`: インデントレベル（StructureDetectorで後から付与）
 - `inline_runs`: 部分的な書式（リッチテキスト）の分割リスト
 
@@ -126,6 +141,8 @@ Excel: [氏名:]  [山田太郎]
 - `text`: テキスト内容
 - `level`: 見出しレベル（1-6）またはリストのインデント深さ
 - `source_row`: 元のExcel行番号（ソート用）
+- `is_numbered_list`: 番号付きリスト（`1.`/`1)` 形式で始まる）か否か
+- `comment_text`: 脚注として出力するセルコメント（`None` の場合は脚注なし）
 
 **関連エンティティ**: TextBlock（変換元）、TableElement（表の特殊型）
 
@@ -147,6 +164,24 @@ Excel: [氏名:]  [山田太郎]
 
 ---
 
+### TableCell
+
+**定義**: TableElement 内の個々のセルを表すデータ構造。
+
+**主要フィールド**:
+- `text`: セルのテキスト内容
+- `row`: テーブル相対行インデックス（0-based）
+- `col`: テーブル相対列インデックス（0-based）
+- `is_header`: 最初の行のセルは `True`
+
+**制約**: 表内の結合セルはMarkdownでセルスパンが未サポートのため、非起点セルは空文字（`""`）として出力する（ベストエフォート）
+
+**実装箇所**: `excel_to_markdown/models.py`
+
+**関連エンティティ**: TableElement（親）
+
+---
+
 ### InlineRun
 
 **定義**: セル内の部分的な書式（リッチテキスト）を表す最小単位。
@@ -165,7 +200,7 @@ Excel: [氏名:]  [山田太郎]
 
 ### 変換パイプライン
 
-**定義**: Excel → RawCell → TextBlock → DocElement → Markdown文字列 という5段階の一方向データフロー。
+**定義**: Excel → RawCell → TextBlock → DocElement → Markdown文字列 という5種類の中間データ形式を経由する、4コンポーネント構成の一方向データフロー。
 
 **本プロジェクトでの適用**: 各ステージは前段の出力のみに依存し、後段を知らない。これによりreader層の変更（xlsx→xls追加等）が後段に影響しない。
 
@@ -175,6 +210,21 @@ Excel: [氏名:]  [山田太郎]
 ```
 
 **関連コンポーネント**: xlsx_reader、merge_resolver、structure_detector、markdown_renderer
+
+---
+
+### baseline_col
+
+**定義**: シート内でコンテンツが存在する最左の列番号。
+
+**説明**:
+インデントレベルの基準列として使用する。`baseline_col` の列位置が `indent_level=0` に対応し、それより右にある列が相対的なインデントを持つ。
+
+**計算式**: `baseline_col = min(cell.col for cell in cells if cell.value)`
+
+**実装箇所**: `excel_to_markdown/parser/cell_grid.py` の `CellGrid.baseline_col` プロパティ
+
+**関連用語**: col_unit、インデントレベル
 
 ---
 
@@ -298,16 +348,6 @@ DocElementの`element_type`フィールドで使用する列挙型。
 
 ---
 
-### WARNINGコメント
-
-**定義**: 変換結果のMarkdownに挿入する構造認識失敗の通知コメント。
-
-**形式**: `<!-- WARNING: 構造を認識できませんでした -->`
-
-**本プロジェクトでの使用**: ベストエフォート変換でセルを段落として出力した際に、認識失敗を明示するために挿入する。
-
----
-
 ## アルゴリズム用語
 
 ### 見出し判定アルゴリズム
@@ -330,6 +370,29 @@ DocElementの`element_type`フィールドで使用する列挙型。
 
 ---
 
+### ラベル:値パターン認識
+
+**定義**: 同一行に横並びの2ブロックをラベルと値として認識し、`**ラベル:** 値` 形式に変換するアルゴリズム。
+
+**検出条件**:
+- 同一 `top_row` に2ブロックが存在する
+- 左ブロックのテキストが20文字以下
+
+**処理フロー**:
+```
+group_same_row_blocks() → 同一行グループを生成
+process_row_group()     → ブロック数で分岐
+  2ブロック + 左≤20文字 → ラベル:値パターン → PARAGRAPH（**ラベル:** 値）
+  3ブロック以上         → スペース区切りで1段落に結合
+  1ブロック             → 通常分類（見出し/段落/リスト）
+```
+
+**実装箇所**: `excel_to_markdown/parser/structure_detector.py` の `process_row_group()`・`is_label_value_pair()`
+
+**関連用語**: ラベル:値パターン、TextBlock、DocElement
+
+---
+
 ### グリッド表検出
 
 **定義**: TextBlockの空間配置からGFMテーブルに変換すべき矩形グリッドを検出するアルゴリズム。
@@ -340,3 +403,44 @@ DocElementの`element_type`フィールドで使用する列挙型。
 - 曖昧なケース（不完全グリッド）は非検出（保守的判定）
 
 **実装箇所**: `excel_to_markdown/parser/table_detector.py` の `find_tables()`
+
+---
+
+## 索引
+
+### 50音順
+
+| 用語 | セクション |
+|------|----------|
+| エクセル方眼紙 | ドメイン用語 |
+| 印刷領域（Print Area） | ドメイン用語 |
+| インデントティア | アーキテクチャ用語 |
+| インデントレベル | アーキテクチャ用語 |
+| ウォーニングコメント → WARNINGコメント | ドメイン用語 |
+| グリッド表検出 | アルゴリズム用語 |
+| ベストエフォート変換 | ドメイン用語 |
+| ラベル:値パターン | ドメイン用語 |
+| ラベル:値パターン認識 | アルゴリズム用語 |
+| 見出し判定アルゴリズム | アルゴリズム用語 |
+| 変換パイプライン | アーキテクチャ用語 |
+
+### アルファベット順
+
+| 用語 | セクション |
+|------|----------|
+| baseline_col | アーキテクチャ用語 |
+| CLI | 略語・頭字語 |
+| col_unit | アーキテクチャ用語 |
+| DocElement | データモデル用語 |
+| ElementType | ElementType（要素種別） |
+| GFM | 技術用語 |
+| InlineRun | データモデル用語 |
+| modal_row_height | アーキテクチャ用語 |
+| openpyxl | 技術用語 |
+| PRD | 略語・頭字語 |
+| RawCell | データモデル用語 |
+| TableCell | データモデル用語 |
+| TableElement | データモデル用語 |
+| TextBlock | データモデル用語 |
+| WARNINGコメント | ドメイン用語 |
+| xlrd | 技術用語 |

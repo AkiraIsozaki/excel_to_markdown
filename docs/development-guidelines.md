@@ -1,5 +1,19 @@
 # 開発ガイドライン (Development Guidelines)
 
+## 概要
+
+本ドキュメントは、`excel_to_markdown` プロジェクトに参加するすべての開発者を対象とした開発規約・プロセスのガイドラインです。
+
+**カバー範囲**:
+- コーディング規約（命名・フォーマット・型ヒント・コメント・dataclass・エラーハンドリング）
+- Git運用ルール（ブランチ戦略・コミットメッセージ・PR プロセス）
+- テスト戦略（種類・書き方・モック方針）
+- コードレビュー基準
+- 開発環境セットアップ
+- CI/CD 方針
+
+---
+
 ## コーディング規約
 
 ### 命名規則
@@ -54,7 +68,14 @@ class ElementType(enum.Enum):
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]   # pycodestyle + pyflakes + isort
 ```
+
+- `E`: pycodestyle（スタイル）
+- `F`: pyflakes（未使用インポート・変数等）
+- `I`: isort（インポート順序）
 
 **インデント**: 4スペース（タブ禁止）
 
@@ -137,6 +158,9 @@ class TextBlock:
     top_row: int
     indent_level: int = 0   # MergeResolver後にStructureDetectorが更新
 ```
+
+**コンポーネント設計の原則**:
+パイプラインの各コンポーネント（reader・parser・renderer）は**純関数またはクラスメソッドとして実装し、副作用を持たないこと**。ファイル読み込みや書き込みはCLIレイヤーに限定し、内部コンポーネントはデータ変換のみを担う（`architecture.md` の「pure function（副作用なし）として実装」方針と対応）。
 
 ---
 
@@ -259,7 +283,7 @@ PRD機能要件2の受け入れ条件に対応。
 | 統合テスト | `tests/test_integration.py` | xlsxフィクスチャ→Markdownのエンドツーエンド確認 |
 | パフォーマンステスト | `tests/test_integration.py` | A4/1,000行の変換時間確認 |
 
-**カバレッジ目標**: 80%以上
+**カバレッジ目標**: `excel_to_markdown/` パッケージ全体で80%以上（エントリーポイントの `__main__.py` も計測対象に含める）
 
 ### ユニットテストの書き方
 
@@ -342,7 +366,7 @@ def test_integration_simple_heading(simple_workbook, tmp_path):
 
 - **外部ライブラリ（openpyxl等）はモックしない**: 実際のxlsxを生成してテストする
 - **ファイルシステムへの書き込みは `tmp_path`** フィクスチャを使って一時ディレクトリに行う
-- **パフォーマンステストのタイムアウト**: `@pytest.mark.timeout(30)` で30秒超をfail
+- **パフォーマンステストのタイムアウト**: `time.perf_counter()` で計測し pytest 内でアサート（3秒/30秒の閾値）。`pytest-timeout` を使う場合は `pyproject.toml` の dev 依存に追加すること
 
 ---
 
@@ -399,12 +423,22 @@ H1と誤判定される可能性があります。`font_size is not None and fon
 
 ### 必要なツール
 
-| ツール | バージョン | 提供方法 |
-|--------|-----------|---------|
-| Python | 3.12以上 | devcontainer に含まれる |
-| pip | 最新 | Python付属 |
+| ツール | バージョン | 用途 |
+|--------|-----------|------|
+| Python | 3.12以上 | ランタイム |
+| ruff | >=0.4.0 | lint / format |
+| mypy | >=1.10.0 | 型チェック |
+| pytest | >=8.0.0 | テストランナー |
+| pytest-cov | >=5.0.0 | カバレッジ計測 |
+| openpyxl | >=3.1.0,<4.0.0 | xlsx読み込み（本番依存） |
+
+詳細なバージョン制約は `pyproject.toml` および `docs/architecture.md`「依存関係管理」を参照。
 
 ### セットアップ手順
+
+**devcontainer を使う場合**: VS Code でリポジトリを開き「Reopen in Container」を選択するだけで環境が揃う（Python・開発ツールはすべてコンテナに含まれる）。
+
+**ローカル環境を使う場合**:
 
 ```bash
 # 1. リポジトリのクローン
@@ -452,3 +486,21 @@ ruff check excel_to_markdown/ && mypy excel_to_markdown/ && pytest tests/
 - `ms-python.python`: Python基本拡張
 - `ms-python.vscode-pylance`: 型チェックとインテリセンス
 - `charliermarsh.ruff`: Ruff lint/format（保存時に自動実行）
+
+---
+
+## CI/CD
+
+### 現在の方針
+
+CIパイプラインは未導入。PR作成前に開発者がローカルで以下を全パスさせること:
+
+```bash
+ruff check excel_to_markdown/ && mypy excel_to_markdown/ && pytest tests/
+```
+
+これは「プルリクエストプロセス」の作成前チェックリストと対応している。
+
+### 将来計画
+
+GitHub Actions等のCI環境でテスト・lint・型チェック・パフォーマンステストの自動実行を検討中。導入時は `pytest-benchmark` を用いてパフォーマンス閾値（3秒/30秒）の自動監視も追加する（詳細は `docs/architecture.md`「CI/CD連携」を参照）。

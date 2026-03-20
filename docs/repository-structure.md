@@ -81,7 +81,7 @@ excel_to_markdown/
 │       ├── doc-reviewer.md
 │       └── implementation-validator.md
 │
-├── .steering/                   # 開発作業ステアリングファイル（一時）
+├── .steering/                   # 開発作業ステアリングファイル（リポジトリに含める）
 │
 ├── .gitignore
 └── README.md                    # セットアップ・使い方
@@ -324,7 +324,7 @@ models.py ←── 全モジュールが参照可能（共有レイヤー）
     └── tasklist.md
 ```
 
-**.gitignore に追加**: ステアリングファイルはリポジトリには含めない。作業完了後も履歴として `.steering/` ディレクトリに保持し、削除はしない。
+**リポジトリに含める**: ステアリングファイルはリポジトリに含める。作業ごとの要件・設計・進捗が履歴として残ることで、過去の意思決定を追跡できる。作業完了後も削除せず `.steering/` ディレクトリに保持する。
 
 ### .claude/（Claude Code設定）
 
@@ -366,9 +366,6 @@ build/
 # OS
 .DS_Store
 Thumbs.db
-
-# 開発作業
-.steering/
 
 # ログ
 *.log
