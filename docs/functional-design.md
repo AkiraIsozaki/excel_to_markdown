@@ -5,6 +5,8 @@
 ```mermaid
 graph TB
     User[ユーザー]
+    Browser[ブラウザ\nHTML5 D&D UI]
+    WebLayer[Web UIレイヤー\nweb/app.py - FastAPI]
     CLI[CLIレイヤー\ncli.py / __main__.py]
     Reader[読み込みレイヤー\nxlsx_reader / xls_reader]
     Grid[空間解析レイヤー\ncell_grid / merge_resolver]
@@ -12,16 +14,21 @@ graph TB
     Renderer[出力レイヤー\nmarkdown_renderer]
     Models[共有データモデル\nmodels.py]
     Input[(input.xlsx / .xls)]
-    Output[(output.md)]
+    Output[(output.md / .zip)]
 
-    User --> CLI
+    User -->|"CLI経由"| CLI
+    User -->|"ブラウザ経由 (P2)"| Browser
+    Browser -->|"POST /api/convert"| WebLayer
+    WebLayer -->|"run_file()"| CLI
     CLI --> Reader
     Reader --> Input
     Reader --> Grid
     Grid --> Detector
     Detector --> Renderer
     Renderer --> Output
-    Renderer --> User
+    Renderer --> CLI
+    CLI --> User
+    WebLayer --> Browser
     Models -. "全レイヤーが参照" .-> Reader
     Models -. "全レイヤーが参照" .-> Grid
     Models -. "全レイヤーが参照" .-> Detector
@@ -35,6 +42,12 @@ graph TB
                Reader      MergeResolver  StructureDetector  Renderer
 ```
 
+### Web UIレイヤー（P2）
+
+```
+[ブラウザ D&D] → POST /api/convert → [tempfile] → 変換パイプライン → [.md / .zip]
+```
+
 ---
 
 ## 技術スタック
@@ -45,6 +58,9 @@ graph TB
 | xlsx読み込み | openpyxl 3.1+ | 純Pythonで結合セル・フォント情報を完全サポート |
 | xls読み込み | xlrd 2.x (P1) | .xls専用。openpyxlと同じRawCellモデルに変換 |
 | CLI | argparse（標準ライブラリ） | 追加依存なし。十分な機能を持つ |
+| Web APIフレームワーク | FastAPI 0.110+ (P2) | 型ヒントベースで簡潔。ファイルアップロード・静的ファイル配信が標準搭載 |
+| ASGIサーバー | uvicorn 0.29+ (P2) | FastAPIの推奨サーバー。高パフォーマンス |
+| Web UI | HTML5 + Vanilla JS (P2) | 外部CDN不要。オフライン環境でも動作 |
 | テスト | pytest 8.x | フィクスチャ管理が優れている |
 | テストカバレッジ | pytest-cov | カバレッジ80%以上を計測 |
 
@@ -210,6 +226,37 @@ erDiagram
 
 ---
 
+### 0-B. web/app.py — Web UIレイヤー（P2）
+
+**責務**: FastAPIアプリの定義・ファイルアップロードの受け付け・変換パイプラインの呼び出し・レスポンス返却
+
+**依存関係**:
+- 依存可能: `cli.run_file()`、FastAPI、uvicorn、python-multipart
+- 依存禁止: `parser/`、`renderer/`（cli.pyを通じて間接的に利用する）
+
+```python
+def create_app() -> FastAPI:
+    """FastAPIアプリのファクトリ。テスト時はこれを直接使用する。"""
+    ...
+
+@app.post("/api/convert")
+async def convert(files: list[UploadFile] = File(...)) -> Response:
+    """
+    単一ファイル → Content-Type: text/markdown
+    複数ファイル → Content-Type: application/zip
+    失敗ファイルはスキップし、成功分のみ返す（複数時）
+    """
+    ...
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+```
+
+**静的ファイル配信**: `/static/` を `web/static/` ディレクトリにマウント。`GET /` は `index.html` を返す。
+
+---
+
 ### 1. cli.py / __main__.py — CLIレイヤー
 
 **責務**: コマンドライン引数のパース・バリデーション、変換パイプラインの起動
@@ -219,6 +266,13 @@ erDiagram
 ```python
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """CLI引数を解析する。バリデーションエラーはargparseが処理。"""
+    ...
+
+def run_file(input_path: Path, base_font_size: float = 11.0) -> str:
+    """
+    1つのExcelファイルをMarkdown文字列に変換して返す。
+    web/app.py からも呼び出される共通ヘルパー。
+    """
     ...
 
 def run(args: argparse.Namespace) -> int:
@@ -651,6 +705,19 @@ options:
   --version             バージョンを表示して終了
 ```
 
+### serve サブコマンド（P2 Web UI）
+
+```bash
+usage: python -m excel_to_markdown serve [-h] [--port PORT] [--no-browser]
+
+options:
+  -h, --help      使い方を表示して終了
+  --port PORT     サーバーのポート番号（デフォルト: 8000）
+  --no-browser    ブラウザを自動で開かない
+```
+
+`serve` サブコマンドは uvicorn でローカルWebサーバーを起動する。bindアドレスは `127.0.0.1` 固定（ローカル専用）。
+
 **`--base-font-size` の動作**:
 デフォルトの閾値（18pt/14pt/12pt）を `base_font_size / 11.0` 倍率で再計算する。
 - `--base-font-size 10.5` → 閾値: 17.2pt / 13.4pt / 11.5pt
@@ -669,6 +736,17 @@ options:
 | 空シート | 変換対象セルが0件 | 警告して継続 | `警告: シート "{name}" にコンテンツがありません。スキップします` |
 | 構造認識不能 | 分類できないセル | ベストエフォート（継続） | Markdown内に `<!-- WARNING: 構造を認識できませんでした -->` を挿入 |
 | 予期しない例外 | その他の例外 | exit code 2 | `予期しないエラーが発生しました: {message}` |
+
+### Web UIエラー（P2）
+
+| エラー種別 | HTTPステータス | レスポンスボディ |
+|-----------|--------------|----------------|
+| 非対応拡張子 | 400 Bad Request | `{"detail": "対応していないファイル形式です: .csv（.xlsx/.xls のみ対応）"}` |
+| ファイルサイズ超過 | 413 Request Entity Too Large | `{"detail": "ファイルサイズが上限（50MB）を超えています"}` |
+| 全ファイル変換失敗 | 422 Unprocessable Entity | `{"detail": "すべてのファイルの変換に失敗しました"}` |
+| サーバー内部エラー | 500 Internal Server Error | `{"detail": "変換中に予期しないエラーが発生しました"}` |
+
+複数ファイルの一部失敗時は、成功分をZIPに含めて返し、レスポンスヘッダー `X-Conversion-Errors` に失敗ファイル名をカンマ区切りで通知する。
 
 ---
 

@@ -32,7 +32,20 @@ DEFAULT_ROW_HEIGHT: float = 15.0
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    """CLI 引数を解析する。バリデーションエラーは argparse が処理。"""
+    """CLI 引数を解析する。バリデーションエラーは argparse が処理。
+
+    第 1 引数が "serve" の場合は Web UI サーバーモード、それ以外は従来の変換モード。
+    """
+    argv_list = list(argv) if argv is not None else sys.argv[1:]
+
+    if argv_list and argv_list[0] == "serve":
+        return _parse_serve_args(argv_list[1:])
+
+    return _parse_convert_args(argv_list)
+
+
+def _parse_convert_args(argv: list[str]) -> argparse.Namespace:
+    """変換モードの引数を解析する。"""
     parser = argparse.ArgumentParser(
         prog="python -m excel_to_markdown",
         description="Excel方眼紙 (.xlsx/.xls) を Markdown に変換する",
@@ -73,7 +86,60 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="version",
         version=f"%(prog)s {__version__}",
     )
-    return parser.parse_args(argv)
+    ns = parser.parse_args(argv)
+    ns.subcommand = "convert"
+    return ns
+
+
+def _parse_serve_args(argv: list[str]) -> argparse.Namespace:
+    """serve サブコマンドの引数を解析する。"""
+    parser = argparse.ArgumentParser(
+        prog="python -m excel_to_markdown serve",
+        description="ブラウザ型 Web UI サーバーを起動する",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="サーバーのポート番号（デフォルト: 8000）",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        default=False,
+        help="ブラウザを自動で開かない",
+    )
+    ns = parser.parse_args(argv)
+    ns.subcommand = "serve"
+    return ns
+
+
+def serve(args: argparse.Namespace) -> int:
+    """Web UI サーバーを起動する。"""
+    try:
+        import webbrowser
+
+        import uvicorn
+    except ImportError:
+        print(
+            "エラー: Web UI の起動には uvicorn が必要です。"
+            "`pip install excel-to-markdown[web]` でインストールしてください",
+            file=sys.stderr,
+        )
+        return 1
+
+    from excel_to_markdown.web.app import create_app
+
+    port: int = args.port
+    url = f"http://127.0.0.1:{port}"
+    print(f"Web UI を起動中: {url}")
+
+    if not args.no_browser:
+        webbrowser.open(url)
+
+    app = create_app()
+    uvicorn.run(app, host="127.0.0.1", port=port)
+    return 0
 
 
 def run(args: argparse.Namespace) -> int:
@@ -99,7 +165,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"エラー: {e}", file=sys.stderr)
         return 1
     except PermissionError:
-        print(f"エラー: 出力ファイルに書き込めません", file=sys.stderr)
+        print("エラー: 出力ファイルに書き込めません", file=sys.stderr)
         return 1
     except Exception as e:  # noqa: BLE001
         print(f"予期しないエラーが発生しました: {e}", file=sys.stderr)
@@ -112,7 +178,10 @@ def _run_batch(dir_path: Path, args: argparse.Namespace) -> int:
         list(dir_path.glob("**/*.xlsx")) + list(dir_path.glob("**/*.xls"))
     )
     if not targets:
-        print(f"警告: ディレクトリ内に変換対象ファイルが見つかりません: {dir_path}", file=sys.stderr)
+        print(
+            f"警告: ディレクトリ内に変換対象ファイルが見つかりません: {dir_path}",
+            file=sys.stderr,
+        )
         return 0
 
     exit_code = 0
@@ -273,10 +342,40 @@ def _run_pipeline(
     return render(all_elements, footnotes)
 
 
+def run_file(
+    input_path: Path,
+    base_font_size: float = DEFAULT_BASE_FONT_SIZE,
+) -> str:
+    """1つの Excel ファイルを Markdown 文字列に変換して返す。
+
+    web/app.py からも呼び出される共通ヘルパー。
+    全シートを統合した Markdown を返す。変換失敗時は例外を送出する。
+    """
+    _validate_input(input_path)
+    dummy_args = argparse.Namespace(
+        sheet=None,
+        debug=False,
+        base_font_size=base_font_size,
+    )
+    sheet_markdowns = _process_workbook(input_path, dummy_args)
+
+    if not sheet_markdowns:
+        return ""
+
+    if len(sheet_markdowns) == 1:
+        return sheet_markdowns[0][1]
+
+    parts: list[str] = [f"# {name}\n\n{md}" for name, md in sheet_markdowns]
+    return "\n\n---\n\n".join(parts)
+
+
 def main() -> None:
     """CLI エントリーポイント。"""
     args = parse_args()
-    sys.exit(run(args))
+    if args.subcommand == "serve":
+        sys.exit(serve(args))
+    else:
+        sys.exit(run(args))
 
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,8 @@
 | xlsx読み込み | openpyxl 3.1+ |
 | xls読み込み | xlrd 2.x（オプション） |
 | CLI | argparse（標準ライブラリ） |
-| テスト | pytest 8.x + pytest-cov |
+| Web UI | FastAPI 0.110+ / uvicorn / python-multipart（オプション） |
+| テスト | pytest 8.x + pytest-cov / httpx（Web UIテスト用） |
 | リント | ruff |
 | 型チェック | mypy（strict） |
 | ビルド | hatchling |

@@ -22,6 +22,12 @@ excel_to_markdown/
 │   │   ├── xlsx_reader.py       # openpyxl → list[RawCell]
 │   │   └── xls_reader.py        # xlrd → list[RawCell]（P1）
 │   │
+│   ├── web/                     # Web UIレイヤー（P2）
+│   │   ├── __init__.py
+│   │   ├── app.py               # FastAPIアプリ・エンドポイント定義
+│   │   └── static/
+│   │       └── index.html       # D&D変換UI（Vanilla JS）
+│   │
 │   ├── parser/                  # 解析レイヤー
 │   │   ├── __init__.py
 │   │   ├── cell_grid.py         # CellGrid（col_unit・modal_row_height算出）
@@ -49,7 +55,8 @@ excel_to_markdown/
 │   ├── test_table_detector.py
 │   ├── test_structure_detector.py
 │   ├── test_markdown_renderer.py
-│   └── test_integration.py      # エンドツーエンド統合テスト
+│   ├── test_integration.py      # エンドツーエンド統合テスト
+│   └── test_web_app.py          # Web API テスト（P2）
 │
 ├── docs/                        # プロジェクトドキュメント
 │   ├── ideas/
@@ -390,6 +397,11 @@ dependencies = [
 
 [project.optional-dependencies]
 xls = ["xlrd>=2.0.0,<3.0.0"]   # .xls対応（P1）
+web = [                          # Web GUI対応（P2）
+    "fastapi>=0.110.0,<1.0.0",
+    "uvicorn[standard]>=0.29.0,<1.0.0",
+    "python-multipart>=0.0.9",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=5.0.0",

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Excel → Markdown 変換</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f5f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 16px rgba(0,0,0,.10);
+      padding: 40px 48px;
+      width: 100%;
+      max-width: 560px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      font-size: .875rem;
+      color: #666;
+      margin-bottom: 28px;
+    }
+
+    /* ---- ドロップゾーン ---- */
+    .dropzone {
+      border: 2px dashed #b0b0b0;
+      border-radius: 10px;
+      padding: 40px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+      position: relative;
+    }
+    .dropzone:hover,
+    .dropzone.dragover {
+      border-color: #3b82f6;
+      background: #eff6ff;
+    }
+    .dropzone input[type=file] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    .dropzone-icon {
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+      line-height: 1;
+    }
+
+    .dropzone-label {
+      font-size: .95rem;
+      color: #444;
+      margin-bottom: 4px;
+    }
+    .dropzone-label strong { color: #3b82f6; }
+
+    .dropzone-hint {
+      font-size: .8rem;
+      color: #999;
+    }
+
+    /* ---- ファイルリスト ---- */
+    .file-list {
+      margin-top: 18px;
+      display: none;
+    }
+    .file-list.visible { display: block; }
+
+    .file-list-title {
+      font-size: .8rem;
+      font-weight: 600;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      margin-bottom: 8px;
+    }
+
+    .file-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: .875rem;
+      color: #333;
+      padding: 5px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .file-item:last-child { border-bottom: none; }
+    .file-icon { color: #22c55e; font-size: 1rem; }
+
+    /* ---- ボタン ---- */
+    .btn {
+      display: block;
+      width: 100%;
+      margin-top: 20px;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+    }
+    .btn-primary {
+      background: #3b82f6;
+      color: #fff;
+    }
+    .btn-primary:hover:not(:disabled) { background: #2563eb; }
+    .btn-primary:disabled { opacity: .55; cursor: not-allowed; }
+
+    /* ---- スピナー ---- */
+    .spinner-wrap {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 16px;
+      font-size: .9rem;
+      color: #555;
+    }
+    .spinner-wrap.visible { display: flex; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      width: 22px; height: 22px;
+      border: 3px solid #d1d5db;
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+
+    /* ---- メッセージ ---- */
+    .message {
+      margin-top: 14px;
+      font-size: .875rem;
+      border-radius: 6px;
+      padding: 10px 14px;
+      display: none;
+    }
+    .message.visible { display: block; }
+    .message.success { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+    .message.error   { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .message.warning { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>Excel → Markdown 変換</h1>
+  <p class="subtitle">.xlsx / .xls ファイルをドラッグ＆ドロップするか、クリックして選択してください</p>
+
+  <div class="dropzone" id="dropzone">
+    <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
+    <div class="dropzone-icon">📄</div>
+    <p class="dropzone-label"><strong>ファイルを選択 / ドロップ</strong></p>
+    <p class="dropzone-hint">.xlsx・.xls 対応 ／ 複数ファイル可 ／ 最大 50MB/ファイル</p>
+  </div>
+
+  <div class="file-list" id="fileList">
+    <p class="file-list-title">選択中のファイル</p>
+    <div id="fileItems"></div>
+  </div>
+
+  <button class="btn btn-primary" id="convertBtn" disabled>変換してダウンロード</button>
+
+  <div class="spinner-wrap" id="spinner">
+    <div class="spinner"></div>
+    <span>変換中...</span>
+  </div>
+
+  <div class="message" id="message"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const dropzone   = document.getElementById('dropzone');
+  const fileInput  = document.getElementById('fileInput');
+  const fileList   = document.getElementById('fileList');
+  const fileItems  = document.getElementById('fileItems');
+  const convertBtn = document.getElementById('convertBtn');
+  const spinner    = document.getElementById('spinner');
+  const message    = document.getElementById('message');
+
+  let selectedFiles = [];
+
+  // ---- ドラッグ＆ドロップ ----
+  dropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropzone.classList.add('dragover');
+  });
+
+  ['dragleave', 'dragend'].forEach((ev) => {
+    dropzone.addEventListener(ev, () => dropzone.classList.remove('dragover'));
+  });
+
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    handleFiles(Array.from(e.dataTransfer.files));
+  });
+
+  // ---- ファイル選択ダイアログ ----
+  fileInput.addEventListener('change', () => {
+    handleFiles(Array.from(fileInput.files));
+    fileInput.value = '';   // 同一ファイルの再選択を可能にするためリセット
+  });
+
+  function handleFiles(files) {
+    const allowed = files.filter((f) => /\.(xlsx|xls)$/i.test(f.name));
+    const rejected = files.filter((f) => !/\.(xlsx|xls)$/i.test(f.name));
+
+    selectedFiles = allowed;
+    renderFileList();
+    hideMessage();
+
+    if (rejected.length > 0) {
+      showMessage(
+        `非対応のファイルを除外しました: ${rejected.map((f) => f.name).join(', ')}`,
+        'warning'
+      );
+    }
+  }
+
+  function renderFileList() {
+    if (selectedFiles.length === 0) {
+      fileList.classList.remove('visible');
+      convertBtn.disabled = true;
+      return;
+    }
+    fileItems.innerHTML = selectedFiles
+      .map((f) => `<div class="file-item"><span class="file-icon">✓</span>${escapeHtml(f.name)}</div>`)
+      .join('');
+    fileList.classList.add('visible');
+    convertBtn.disabled = false;
+  }
+
+  // ---- 変換実行 ----
+  convertBtn.addEventListener('click', async () => {
+    if (selectedFiles.length === 0) return;
+
+    setLoading(true);
+    hideMessage();
+
+    const formData = new FormData();
+    selectedFiles.forEach((f) => formData.append('files', f));
+
+    try {
+      const res = await fetch('/api/convert', { method: 'POST', body: formData });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ detail: 'サーバーエラーが発生しました' }));
+        throw new Error(body.detail || `HTTP ${res.status}`);
+      }
+
+      // 部分エラーの通知
+      const errHeader = res.headers.get('X-Conversion-Errors');
+
+      // ダウンロード
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition') || '';
+      const filenameMatch = cd.match(/filename="([^"]+)"/);
+      const filename = filenameMatch ? filenameMatch[1] : 'converted.zip';
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      if (errHeader) {
+        showMessage(
+          `変換完了（一部失敗）: ${errHeader} の変換に失敗しました`,
+          'warning'
+        );
+      } else {
+        showMessage('変換が完了しました。ダウンロードを確認してください。', 'success');
+      }
+
+    } catch (err) {
+      showMessage(`エラー: ${err.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  // ---- ユーティリティ ----
+  function setLoading(on) {
+    convertBtn.disabled = on;
+    spinner.classList.toggle('visible', on);
+    dropzone.style.pointerEvents = on ? 'none' : '';
+  }
+
+  function showMessage(text, type) {
+    message.textContent = text;
+    message.className = `message visible ${type}`;
+  }
+
+  function hideMessage() {
+    message.className = 'message';
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+}());
+</script>
+</body>
+</html>
