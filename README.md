@@ -15,6 +15,8 @@ Excel方眼紙（日本のSIer文化で広く使われるグリッド状Excelド
 
 ## インストール
 
+### オンライン環境
+
 ```bash
 git clone <このリポジトリ>
 cd excel_to_markdown
@@ -38,6 +40,42 @@ pip install -e ".[web]"
 ```bash
 pip install -e ".[xls,web,dev]"
 ```
+
+### オフライン環境（インターネット不要）
+
+リポジトリには `wheelhouse/` ディレクトリに依存パッケージのwheelファイルが同梱されています。
+Python 3.12 / Linux (x86_64) 向けです。
+
+**`install.sh` を使う（推奨）**:
+
+```bash
+# 本体のみ
+./install.sh
+
+# Web UI（FastAPI）込み
+./install.sh web
+
+# .xlsサポート込み
+./install.sh xls
+
+# 全オプション込み
+./install.sh all
+```
+
+**pip コマンドで直接インストールする場合**:
+
+```bash
+# 本体のみ
+pip install --no-index --find-links=./wheelhouse .
+
+# Web UI込み
+pip install --no-index --find-links=./wheelhouse ".[web]"
+
+# xls + Web UI込み
+pip install --no-index --find-links=./wheelhouse ".[web,xls]"
+```
+
+> **前提条件**: Python 3.12 以上、pip が利用可能であること。
 
 ## 使い方
 
