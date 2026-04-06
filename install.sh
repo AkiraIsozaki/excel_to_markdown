@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WHEELHOUSE="${SCRIPT_DIR}/wheelhouse"
+VENV_DIR="${SCRIPT_DIR}/.venv"
 
 echo "=== excel-to-markdown オフラインインストーラー ==="
 echo ""
@@ -17,22 +18,7 @@ fi
 MODE="${1:-base}"
 
 case "${MODE}" in
-  base)
-    echo "インストール対象: 本体のみ (openpyxl)"
-    pip install --no-index --find-links="${WHEELHOUSE}" "${SCRIPT_DIR}"
-    ;;
-  web)
-    echo "インストール対象: 本体 + Web UI (fastapi / uvicorn)"
-    pip install --no-index --find-links="${WHEELHOUSE}" "${SCRIPT_DIR}[web]"
-    ;;
-  xls)
-    echo "インストール対象: 本体 + xlsサポート (xlrd)"
-    pip install --no-index --find-links="${WHEELHOUSE}" "${SCRIPT_DIR}[xls]"
-    ;;
-  all)
-    echo "インストール対象: 本体 + Web UI + xlsサポート"
-    pip install --no-index --find-links="${WHEELHOUSE}" "${SCRIPT_DIR}[web,xls]"
-    ;;
+  base|web|xls|all) ;;
   *)
     echo "使用方法: $0 [base|web|xls|all]"
     echo ""
@@ -44,10 +30,40 @@ case "${MODE}" in
     ;;
 esac
 
+# venv を作成（既存の場合はスキップ）
+if [ ! -d "${VENV_DIR}" ]; then
+  echo "仮想環境を作成しています: ${VENV_DIR}"
+  python3 -m venv "${VENV_DIR}"
+else
+  echo "既存の仮想環境を使用します: ${VENV_DIR}"
+fi
+
+PIP="${VENV_DIR}/bin/pip"
+
+case "${MODE}" in
+  base)
+    echo "インストール対象: 本体のみ (openpyxl)"
+    "${PIP}" install --no-index --find-links="${WHEELHOUSE}" "${SCRIPT_DIR}"
+    ;;
+  web)
+    echo "インストール対象: 本体 + Web UI (fastapi / uvicorn)"
+    "${PIP}" install --no-index --find-links="${WHEELHOUSE}" "${SCRIPT_DIR}[web]"
+    ;;
+  xls)
+    echo "インストール対象: 本体 + xlsサポート (xlrd)"
+    "${PIP}" install --no-index --find-links="${WHEELHOUSE}" "${SCRIPT_DIR}[xls]"
+    ;;
+  all)
+    echo "インストール対象: 本体 + Web UI + xlsサポート"
+    "${PIP}" install --no-index --find-links="${WHEELHOUSE}" "${SCRIPT_DIR}[web,xls]"
+    ;;
+esac
+
 echo ""
 echo "インストール完了！"
 echo ""
 echo "使い方:"
+echo "  仮想環境を有効化: source ${VENV_DIR}/bin/activate"
 echo "  CLIで変換: excel-to-markdown input.xlsx"
 if [ "${MODE}" = "web" ] || [ "${MODE}" = "all" ]; then
   echo "  Web UIを起動: uvicorn excel_to_markdown.web:app --reload"

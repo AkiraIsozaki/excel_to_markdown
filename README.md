@@ -49,7 +49,7 @@ Python 3.12 / Linux (x86_64) 向けです。
 **`install.sh` を使う（推奨）**:
 
 ```bash
-# 本体のみ
+# 本体のみ（.venv/ に仮想環境が作成されます）
 ./install.sh
 
 # Web UI（FastAPI）込み
@@ -62,9 +62,19 @@ Python 3.12 / Linux (x86_64) 向けです。
 ./install.sh all
 ```
 
+インストール後は仮想環境を有効化して使います：
+
+```bash
+source .venv/bin/activate
+excel-to-markdown input.xlsx
+```
+
 **pip コマンドで直接インストールする場合**:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
+
 # 本体のみ
 pip install --no-index --find-links=./wheelhouse .
 
@@ -75,7 +85,7 @@ pip install --no-index --find-links=./wheelhouse ".[web]"
 pip install --no-index --find-links=./wheelhouse ".[web,xls]"
 ```
 
-> **前提条件**: Python 3.12 以上、pip が利用可能であること。
+> **前提条件**: Python 3.12 以上。共有サーバでも `.venv/` 内に閉じてインストールされます。
 
 ## 使い方
 
