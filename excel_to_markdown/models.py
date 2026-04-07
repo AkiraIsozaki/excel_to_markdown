@@ -9,7 +9,6 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 
-
 # ---------------------------------------------------------------------------
 # レイヤー1: RawCell（生セルデータ）
 # ---------------------------------------------------------------------------
@@ -131,3 +130,41 @@ class TableElement(DocElement):
     element_type: ElementType = field(default=ElementType.TABLE, init=False)
     rows: list[list[TableCell]] = field(default_factory=list)
     col_count: int = 0
+
+
+# ---------------------------------------------------------------------------
+# レイヤー4: 図形データモデル（DrawingML図形変換用）
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DiagramShape:
+    """DrawingML の <xdr:sp> から抽出した図形1つ。
+
+    位置はセル座標（0-based）で保持する。
+    shape_type は prstGeom の prst 値（例: "flowChartProcess"）。
+    """
+
+    shape_id: int  # cNvPr id
+    name: str  # cNvPr name
+    text: str  # txBody のテキスト（空白除去済み）
+    shape_type: str  # prstGeom の prst 値。未設定時は "rect"
+    left_col: int  # TwoCellAnchor.from_.col（0-based）
+    top_row: int  # TwoCellAnchor.from_.row（0-based）
+    right_col: int  # TwoCellAnchor.to_.col（0-based）
+    bottom_row: int  # TwoCellAnchor.to_.row（0-based）
+
+
+@dataclass(frozen=True)
+class DiagramConnector:
+    """DrawingML の <xdr:cxnSp> から抽出したコネクタ1本。
+
+    start_shape_id / end_shape_id は stCxn / endCxn の id 属性。
+    未接続（属性なし）の場合は None。
+    """
+
+    connector_id: int  # cNvPr id
+    name: str  # cNvPr name
+    start_shape_id: int | None  # stCxn id（Noneは未接続）
+    end_shape_id: int | None  # endCxn id（Noneは未接続）
+    label: str  # コネクタ上のテキストラベル（なければ空文字）

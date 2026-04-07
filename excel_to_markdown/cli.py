@@ -82,6 +82,12 @@ def _parse_convert_args(argv: list[str]) -> argparse.Namespace:
         help="TextBlock リストを JSON 形式で stderr に出力",
     )
     parser.add_argument(
+        "--diagram",
+        action="store_true",
+        default=False,
+        help="図形変換モード: Excel図形・コネクタを Mermaid flowchart に変換する",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -149,6 +155,10 @@ def run(args: argparse.Namespace) -> int:
     """
     try:
         input_path = Path(args.input).resolve()
+
+        # --diagram: 図形変換モード
+        if getattr(args, "diagram", False):
+            return _run_diagram(input_path, args)
 
         # バッチ変換モード
         if input_path.is_dir():
@@ -239,15 +249,44 @@ def _process_workbook(
 def _process_xlsx(
     input_path: Path, args: argparse.Namespace
 ) -> list[tuple[str, str]]:
-    """xlsx ファイルを処理して (sheet_name, markdown) のリストを返す。"""
+    """xlsx ファイルを処理して (sheet_name, markdown) のリストを返す。
+
+    drawingを持つシートは自動的にセル内容+Mermaidの統合出力を行う。
+    """
+    from excel_to_markdown.drawing.extractor import extract_sheet_drawing_map
+    from excel_to_markdown.models import DiagramConnector, DiagramShape
+
     wb = _open_workbook(input_path)
+    # シート名 → (shapes, connectors) マッピング（drawingなしのシートは含まれない）
+    drawing_map: dict[str, tuple[list[DiagramShape], list[DiagramConnector]]] = {}
+    try:
+        drawing_map = extract_sheet_drawing_map(input_path)
+    except Exception:  # noqa: BLE001
+        pass  # drawing抽出失敗時は通常変換にフォールバック
+
     sheets = _select_sheets(wb, args.sheet)
     sheet_markdowns: list[tuple[str, str]] = []
 
     for ws in sheets:
         sheet_name: str = ws.title
         raw_cells = read_sheet(ws)
-        if not any(c.value for c in raw_cells):
+        has_cells = any(c.value for c in raw_cells)
+
+        if sheet_name in drawing_map:
+            shapes, connectors = drawing_map[sheet_name]
+            # drawing行スパン（0-based drawing → 1-based cell に変換）
+            drawing_top = min(s.top_row for s in shapes) + 1 if shapes else 1
+            drawing_bottom = max(s.bottom_row for s in shapes) + 1 if shapes else 1
+
+            md = _convert_sheet_combined(
+                ws, raw_cells, shapes, connectors,
+                drawing_top, drawing_bottom, args,
+            )
+            if md.strip():
+                sheet_markdowns.append((sheet_name, md))
+            continue
+
+        if not has_cells:
             print(
                 f'警告: シート "{sheet_name}" にコンテンツがありません。スキップします',
                 file=sys.stderr,
@@ -381,6 +420,107 @@ def main() -> None:
 # ---------------------------------------------------------------------------
 # 内部ヘルパー
 # ---------------------------------------------------------------------------
+
+
+def _convert_sheet_combined(
+    ws: Worksheet,
+    raw_cells: list[RawCell],
+    shapes: list,
+    connectors: list,
+    drawing_top_row: int,
+    drawing_bottom_row: int,
+    args: argparse.Namespace,
+) -> str:
+    """セル内容とDrawingを統合してMarkdown文字列を返す。
+
+    drawing_top_row / drawing_bottom_row は 1-based（openpyxl のセル行番号基準）。
+
+    出力構造:
+        [drawing_top_row より前のセル → markdown]
+        [Drawing → Mermaid block]
+        [drawing_bottom_row より後のセル → markdown]
+    """
+    from excel_to_markdown.renderer.mermaid_renderer import render_mermaid_block
+
+    parts: list[str] = []
+
+    if any(c.value for c in raw_cells):
+        grid = _build_grid(ws, raw_cells)
+        blocks = resolve(raw_cells)
+
+        if args.debug:
+            _dump_blocks_debug(blocks)
+
+        tables, remaining = find_tables(blocks, grid)
+        doc_elements = detect(remaining, grid, args.base_font_size)
+        all_elements: list[DocElement] = sorted(
+            list(tables) + doc_elements, key=lambda e: e.source_row
+        )
+
+        # drawing 行範囲より前の要素
+        before = [e for e in all_elements if e.source_row < drawing_top_row]
+        # drawing 行範囲より後の要素
+        after = [e for e in all_elements if e.source_row > drawing_bottom_row]
+
+        if before:
+            fn = [e.comment_text for e in before if e.comment_text]
+            parts.append(render(before, fn))
+
+    # Mermaid ブロック
+    if shapes:
+        parts.append(render_mermaid_block(shapes, connectors))
+
+    if any(c.value for c in raw_cells):
+        if after:  # type: ignore[possibly-undefined]
+            fn2 = [e.comment_text for e in after if e.comment_text]
+            parts.append(render(after, fn2))
+
+    return "\n\n".join(p.strip() for p in parts if p.strip()) + "\n"
+
+
+def _run_diagram(input_path: Path, args: argparse.Namespace) -> int:
+    """--diagram モード: Excel図形をMermaid形式に変換して出力する。"""
+    from excel_to_markdown.drawing.extractor import extract_diagrams
+    from excel_to_markdown.renderer.mermaid_renderer import render_mermaid_block
+
+    _validate_input(input_path)
+
+    results = extract_diagrams(input_path)
+    if not results:
+        print(
+            f"警告: {input_path.name} に図形（Drawing）が見つかりませんでした",
+            file=sys.stderr,
+        )
+        return 0
+
+    blocks: list[str] = []
+    for idx, (shapes, connectors) in enumerate(results, 1):
+        if not shapes:
+            continue
+        block = render_mermaid_block(shapes, connectors)
+        if len(results) > 1:
+            blocks.append(f"## Drawing {idx}\n\n{block}")
+        else:
+            blocks.append(block)
+
+    if not blocks:
+        print(
+            f"警告: {input_path.name} の Drawing に図形がありませんでした",
+            file=sys.stderr,
+        )
+        return 0
+
+    output = "\n".join(blocks)
+
+    output_path_arg: str | None = getattr(args, "output", None)
+    if output_path_arg:
+        out = Path(output_path_arg).resolve()
+        _write_output(out, output)
+        print(f"Mermaid を出力しました: {out}")
+    else:
+        print(output)
+
+    return 0
 
 
 def _validate_input(path: Path) -> None:
