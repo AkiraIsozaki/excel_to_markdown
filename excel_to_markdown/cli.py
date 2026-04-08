@@ -468,7 +468,9 @@ def _convert_sheet_combined(
 
     # Mermaid ブロック
     if shapes:
-        parts.append(render_mermaid_block(shapes, connectors))
+        from excel_to_markdown.drawing.extractor import detect_swim_lanes
+        swim_lanes = detect_swim_lanes(ws, shapes, connectors)
+        parts.append(render_mermaid_block(shapes, connectors, swim_lanes=swim_lanes))
 
     if any(c.value for c in raw_cells):
         if after:  # type: ignore[possibly-undefined]

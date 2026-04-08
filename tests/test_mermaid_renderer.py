@@ -208,3 +208,119 @@ class TestSampleFlowchartMermaid:
         result = render_mermaid_block(self.shapes, self.connectors)
         assert result.startswith("```mermaid\n")
         assert result.endswith("```\n")
+
+
+# ---------------------------------------------------------------------------
+# スイムレーン (subgraph) のテスト
+# ---------------------------------------------------------------------------
+
+class TestSwimLanes:
+    """swim_lanes パラメータによる subgraph 出力のテスト。"""
+
+    def _make_shape(
+        self,
+        shape_id: int,
+        text: str,
+        left_col: int,
+        right_col: int,
+    ) -> DiagramShape:
+        return DiagramShape(
+            shape_id=shape_id,
+            name=f"shape_{shape_id}",
+            text=text,
+            shape_type="rect",
+            left_col=left_col,
+            top_row=0,
+            right_col=right_col,
+            bottom_row=2,
+        )
+
+    def _make_connector(
+        self, connector_id: int, start: int, end: int
+    ) -> DiagramConnector:
+        return DiagramConnector(
+            connector_id=connector_id,
+            name=f"conn_{connector_id}",
+            start_shape_id=start,
+            end_shape_id=end,
+            label="",
+        )
+
+    def test_swim_lanes_produce_subgraph(self) -> None:
+        """swim_lanes あり → subgraph ブロックが含まれること。"""
+        shapes = [
+            self._make_shape(1, "受付", 0, 3),
+            self._make_shape(2, "処理", 6, 9),
+        ]
+        connectors = [self._make_connector(10, 1, 2)]
+        swim_lanes = [("部署A", 0, 5), ("部署B", 6, 11)]
+
+        result = render_mermaid(shapes, connectors, swim_lanes=swim_lanes)
+        assert "subgraph lane_0" in result
+        assert "subgraph lane_1" in result
+        assert '"部署A"' in result
+        assert '"部署B"' in result
+        assert "end" in result
+
+    def test_swim_lanes_nodes_assigned_correctly(self) -> None:
+        """各ノードが正しいスイムレーンに配置されること。"""
+        shapes = [
+            self._make_shape(1, "受付", 0, 3),   # center=1.5 → lane_0 (0-5)
+            self._make_shape(2, "処理", 6, 9),   # center=7.5 → lane_1 (6-11)
+        ]
+        connectors = [self._make_connector(10, 1, 2)]
+        swim_lanes = [("部署A", 0, 5), ("部署B", 6, 11)]
+
+        result = render_mermaid(shapes, connectors, swim_lanes=swim_lanes)
+        lines = result.split("\n")
+
+        # subgraph lane_0 内に N1 があること
+        in_lane_0 = False
+        lane_0_has_n1 = False
+        lane_1_has_n2 = False
+        in_lane_1 = False
+        for line in lines:
+            stripped = line.strip()
+            if "subgraph lane_0" in stripped:
+                in_lane_0 = True
+                in_lane_1 = False
+            elif "subgraph lane_1" in stripped:
+                in_lane_1 = True
+                in_lane_0 = False
+            elif stripped == "end":
+                in_lane_0 = False
+                in_lane_1 = False
+            elif in_lane_0 and stripped.startswith("N1"):
+                lane_0_has_n1 = True
+            elif in_lane_1 and stripped.startswith("N2"):
+                lane_1_has_n2 = True
+
+        assert lane_0_has_n1, "N1 は lane_0 に配置されるべき"
+        assert lane_1_has_n2, "N2 は lane_1 に配置されるべき"
+
+    def test_swim_lanes_edges_outside_subgraph(self) -> None:
+        """エッジはすべての subgraph の後に出力されること。"""
+        shapes = [
+            self._make_shape(1, "受付", 0, 3),
+            self._make_shape(2, "処理", 6, 9),
+        ]
+        connectors = [self._make_connector(10, 1, 2)]
+        swim_lanes = [("部署A", 0, 5), ("部署B", 6, 11)]
+
+        result = render_mermaid(shapes, connectors, swim_lanes=swim_lanes)
+        last_end_pos = result.rfind("    end")
+        edge_pos = result.find("N1 --> N2")
+        assert last_end_pos < edge_pos, "エッジは最後の subgraph end の後に出力されるべき"
+
+    def test_no_swim_lanes_flat_output(self) -> None:
+        """swim_lanes=None の場合は従来のフラット出力になること。"""
+        shapes = [
+            self._make_shape(1, "受付", 0, 3),
+            self._make_shape(2, "処理", 6, 9),
+        ]
+        connectors = [self._make_connector(10, 1, 2)]
+
+        result = render_mermaid(shapes, connectors, swim_lanes=None)
+        assert "subgraph" not in result
+        assert "N1[受付]" in result
+        assert "N2[処理]" in result

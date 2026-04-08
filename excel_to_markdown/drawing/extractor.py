@@ -13,6 +13,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
+from openpyxl.worksheet.worksheet import Worksheet
+
 from excel_to_markdown.models import DiagramConnector, DiagramShape
 
 # ---------------------------------------------------------------------------
@@ -37,6 +39,78 @@ _DRAWING_REL_TYPE = (
 _WORKSHEET_REL_TYPE = (
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
 )
+
+
+def detect_swim_lanes(
+    ws: Worksheet,
+    shapes: list[DiagramShape],
+    connectors: list[DiagramConnector],
+) -> list[tuple[str, int, int]] | None:
+    """スイムレーンを検出して (lane_name, start_col_0based, end_col_0based) のリストを返す。
+
+    アルゴリズム:
+    1. コネクタで接続されたシェイプの最小 top_row を求める
+    2. その直前の行（0-based row）に対応する 1-based セル行を走査
+    3. 2つ以上の非空セルが異なる列に存在すれば、それをスイムレーンヘッダーとして扱う
+    4. 各レーンの列範囲を (name, start_col_0based, end_col_0based) で返す
+
+    スイムレーンが検出できない場合は None を返す。
+    """
+    if not shapes or not connectors:
+        return None
+
+    # 接続されたシェイプIDセットを取得
+    connected_ids: set[int] = set()
+    for c in connectors:
+        if c.start_shape_id is not None:
+            connected_ids.add(c.start_shape_id)
+        if c.end_shape_id is not None:
+            connected_ids.add(c.end_shape_id)
+
+    if not connected_ids:
+        return None
+
+    # 接続済みシェイプの最小 top_row (0-based)
+    connected_shapes = [s for s in shapes if s.shape_id in connected_ids]
+    if not connected_shapes:
+        return None
+
+    min_top_row_0based = min(s.top_row for s in connected_shapes)
+
+    # その直前の行（1-based）のセルを走査
+    # min_top_row_0based (0-based) = min_top_row_0based + 1 (1-based)
+    # ヘッダーはその 1 行前: min_top_row_0based + 1 - 1 = min_top_row_0based (1-based)
+    # つまり 1-based の行番号 = min_top_row_0based
+    header_row_1based = min_top_row_0based  # 0-based → 1行前の1-based
+
+    if header_row_1based < 1:
+        return None
+
+    # ヘッダー行のセルを収集 (col_1based → value)
+    lane_headers: list[tuple[int, str]] = []  # (col_1based, name)
+    for cell in ws[header_row_1based]:
+        if cell.value is not None:
+            text = str(cell.value).strip()
+            if text:
+                lane_headers.append((cell.column, text))
+
+    if len(lane_headers) < 2:
+        return None
+
+    # 列番号でソート
+    lane_headers.sort(key=lambda x: x[0])
+
+    # 列範囲を計算: (name, start_col_0based, end_col_0based)
+    result: list[tuple[str, int, int]] = []
+    for i, (col_1based, name) in enumerate(lane_headers):
+        start_col_0based = col_1based - 1
+        if i + 1 < len(lane_headers):
+            end_col_0based = lane_headers[i + 1][0] - 2  # 次のレーン開始の1列前
+        else:
+            end_col_0based = 999  # 最後のレーンは右端まで
+        result.append((name, start_col_0based, end_col_0based))
+
+    return result
 
 
 def extract_sheet_drawing_map(

@@ -98,11 +98,32 @@ def _detect_direction(shapes: list[DiagramShape]) -> str:
     return "TD" if height > width * 1.2 else "LR"
 
 
+def _assign_lane(shape: DiagramShape, swim_lanes: list[tuple[str, int, int]]) -> int:
+    """シェイプの中心列からスイムレーンのインデックスを返す。
+
+    どのレーンにも属さない場合は最も近いレーンのインデックスを返す。
+    """
+    center = (shape.left_col + shape.right_col) / 2
+    for i, (_, start, end) in enumerate(swim_lanes):
+        if start <= center <= end:
+            return i
+    # 最も近いレーン（中心との距離が最小）
+    def _dist(i: int) -> float:
+        _, start, end = swim_lanes[i]
+        if center < start:
+            return start - center
+        if center > end:
+            return center - end
+        return 0.0
+    return min(range(len(swim_lanes)), key=_dist)
+
+
 def render_mermaid(
     shapes: list[DiagramShape],
     connectors: list[DiagramConnector],
     *,
     direction: str | None = None,
+    swim_lanes: list[tuple[str, int, int]] | None = None,
 ) -> str:
     """図形・コネクタリストをMermaid flowchart文字列に変換する。
 
@@ -110,6 +131,8 @@ def render_mermaid(
         shapes: DiagramShape のリスト
         connectors: DiagramConnector のリスト
         direction: グラフ方向（'TD'/'LR'）。None で自動判定
+        swim_lanes: スイムレーン定義 [(name, start_col_0based, end_col_0based)]。
+                    指定時は subgraph ブロックを生成する。
 
     Returns:
         Mermaid flowchart 文字列（先頭行は 'flowchart TD' など）
@@ -117,7 +140,7 @@ def render_mermaid(
     if not shapes:
         return "flowchart TD\n"
 
-    dir_ = direction or _detect_direction(shapes)
+    dir_ = direction or ("LR" if swim_lanes else _detect_direction(shapes))
     lines: list[str] = [f"flowchart {dir_}"]
 
     shape_ids = {s.shape_id for s in shapes}
@@ -146,14 +169,35 @@ def render_mermaid(
     else:
         render_shapes = shapes
 
-    # ノード定義
-    for shape in render_shapes:
-        node_id = _node_id(shape.shape_id)
-        text = _safe_text(shape)
-        notation = _node_notation(shape.shape_type, text)
-        lines.append(f"    {node_id}{notation}")
+    if swim_lanes:
+        # subgraph ブロックでスイムレーンを表現
+        # 各レーンにシェイプを割り当てる
+        lane_shapes: dict[int, list[DiagramShape]] = {i: [] for i in range(len(swim_lanes))}
+        for shape in render_shapes:
+            lane_idx = _assign_lane(shape, swim_lanes)
+            lane_shapes[lane_idx].append(shape)
 
-    # エッジ定義
+        # subgraph ブロックを出力
+        for i, (lane_name, _, _) in enumerate(swim_lanes):
+            safe_lane_id = f"lane_{i}"
+            safe_lane_name = lane_name.replace('"', "#quot;")
+            lines.append(f'    subgraph {safe_lane_id} ["{safe_lane_name}"]')
+            lines.append("        direction TB")
+            for shape in lane_shapes[i]:
+                node_id = _node_id(shape.shape_id)
+                text = _safe_text(shape)
+                notation = _node_notation(shape.shape_type, text)
+                lines.append(f"        {node_id}{notation}")
+            lines.append("    end")
+    else:
+        # 従来のフラット出力
+        for shape in render_shapes:
+            node_id = _node_id(shape.shape_id)
+            text = _safe_text(shape)
+            notation = _node_notation(shape.shape_type, text)
+            lines.append(f"    {node_id}{notation}")
+
+    # エッジ定義（subgraph の外に出力）
     for conn in valid_edges:
         src = _node_id(conn.start_shape_id)  # type: ignore[arg-type]
         dst = _node_id(conn.end_shape_id)    # type: ignore[arg-type]
@@ -170,11 +214,14 @@ def render_mermaid_block(
     connectors: list[DiagramConnector],
     *,
     direction: str | None = None,
+    swim_lanes: list[tuple[str, int, int]] | None = None,
 ) -> str:
     """Mermaid文字列をMarkdownコードブロックとして返す。
 
     Returns:
         ```mermaid\\n...\\n``` 形式の文字列
     """
-    mermaid_content = render_mermaid(shapes, connectors, direction=direction)
+    mermaid_content = render_mermaid(
+        shapes, connectors, direction=direction, swim_lanes=swim_lanes
+    )
     return f"```mermaid\n{mermaid_content}```\n"

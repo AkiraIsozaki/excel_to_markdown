@@ -123,6 +123,22 @@ class TestAutoMermaidIntegration:
         assert "```mermaid" in content
         assert "受付用紙に記入する" in content
 
+    def test_gyoumu_複数部署_has_swimlane_subgraphs(self, tmp_path: Path) -> None:
+        """gyoumuflow_answer.xlsx の '複数部署' シートはスイムレーン subgraph を含む。"""
+        if not SAMPLE_GYOUMU.exists():
+            pytest.skip("gyoumuflow_answer.xlsx が見つかりません")
+        out = tmp_path / "out.md"
+        args = parse_args(
+            [str(SAMPLE_GYOUMU), "--sheet", "複数部署", "--output", str(out)]
+        )
+        code = run(args)
+        assert code == 0
+        content = out.read_text(encoding="utf-8")
+        assert "subgraph" in content
+        assert "お客様" in content
+        assert "〇〇ガラス店" in content
+        assert "問屋" in content
+
     def test_gyoumu_はじめに_no_mermaid(self, tmp_path: Path) -> None:
         """gyoumuflow_answer.xlsx の 'はじめに' シートはMermaidなし。"""
         if not SAMPLE_GYOUMU.exists():
